@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<title>Llama 3.1</title>
+		<meta property="og:title" content="Llama 3.1">
+		<meta property="og:url" content="https://lrusso.github.io/Llama/Llama.htm">
+		<meta property="og:description" content="info@lrusso.com">
+		<meta property="og:image" content="https://lrusso.github.io/Llama/LlamaShare.png">
+		<meta property="og:type" content="website">
+		<meta property="og:site_name" content="Llama 3.1">
+		<link rel="icon" sizes="16x16" type="image/png" href="Llama_16x16.png">
+		<link rel="icon" sizes="192x192" type="image/png" href="Llama_192x192.png">
+		<style>
+			*{font-family:Arial;font-size:16px;font-family:ui-sans-serif, -apple-system, system-ui, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol"}
+			html,body{margin:0;padding:0;height:100%;display:flex;justify-content:center;align-items:center}
+			span{line-height:28px;display:inline-block;padding:12px;border-radius:12px;white-space:pre-wrap;background-color:#ececec}
+			code{line-height:28px;display:inline-block;padding:12px;border-radius:12px;white-space:pre-wrap;background-color:#ececec}
+			.chat{width:100%}
+			.container{display:flex;flex-direction:column;width:99vw;height:100vh;padding-left:1vw;padding-right:1vw}
+			.content{display:flex;flex:1;overflow:scroll}
+			.textbox{display:flex;height:50px;padding:14px;margin-left:10px;margin-right:10px;margin-bottom:20px;border:1px solid #ececec;border-radius:16px;resize:none;outline:none;font-size:16px;box-shadow:0 5px 10px rgba(0,0,0,0.1)}
+			.textbox::placeholder{opacity:0.4}
+			.textbox:disabled{background-color:#ececec}
+			.highlighted{background-color:#ececec;display:inline-block;padding-left:4px;padding-right:4px;border-radius:4px}
+			.pointer{line-height:16px;display:inline-block;background-color:black;border-radius:6px;width:12px;height:12px;overflow:hidden}
+
+			@media screen and (min-width:800px)
+				{
+				.container{width:70vw;height:100vh;padding-left:15vw;padding-right:15vw}
+				}
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<div class="content"><div class="chat"></div></div>
+			<textarea class="textbox"></textarea>
+		</div>
+		<script>
+			const lang = window.navigator.language.substring(0, 2).toLowerCase()
+
+			let STRING_SYSTEM = ""
+			let STRING_WELCOME = ""
+			let STRING_PLACEHOLDER = ""
+			var engine
+			var webllm
+			var messages = []
+			var rendering = false;
+
+			if (lang === "es") {
+				STRING_SYSTEM = "Eres un eficiente asistente AI."
+				STRING_WELCOME = String.fromCharCode(191) + "Con qu" + String.fromCharCode(233) + " puedo ayudarte?"
+				STRING_PLACEHOLDER = "Pregunta lo que quieras a Llama"
+			} else {
+				STRING_SYSTEM = "You are a helpful AI assistant."
+				STRING_WELCOME = "How can I help you today?"
+				STRING_PLACEHOLDER = "Ask Llama anything"
+			}
+
+			const loadWebLLM = async () => {
+				const localModelAvailable = await fetch("params_shard_107.bin", { method: "GET", headers: { "Range": "bytes=0-1" } })
+				if (localModelAvailable.ok) {
+					webllm = await import("./Llama.js")
+				} else {
+					webllm = await import ("https://esm.run/@mlc-ai/web-llm")
+				}
+				initialize()
+			}
+
+			const initialize = async () => {
+				try {
+					engine = await webllm.CreateMLCEngine(
+						"Llama-3.1-8B-Instruct-q4f16_1-MLC", // Llama-3_1-8B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm
+						{ initProgressCallback: (initProgress) => {
+							document.getElementsByClassName("chat")[0].style.padding = "15px"
+							document.getElementsByClassName("chat")[0].innerText = initProgress.text
+							if (initProgress.text.indexOf("Finish loading") > -1) {
+								document.getElementsByClassName("chat")[0].style.padding = "0px"
+								document.getElementsByClassName("chat")[0].innerText = ""
+								document.getElementsByClassName("textbox")[0].disabled = false
+								setTimeout(() => {
+									document.getElementsByClassName("textbox")[0].focus()
+								}, 25)
+							}
+						}}
+					)
+				} catch(err) {
+					document.getElementsByClassName("chat")[0].innerText = err
+				}
+
+				const welcomeMessage = document.createElement("span")
+				welcomeMessage.style.backgroundColor = "white"
+				welcomeMessage.innerText = STRING_WELCOME
+				document.getElementsByClassName("chat")[0].appendChild(welcomeMessage)
+
+				messages.push({ role: "system", content: STRING_SYSTEM })
+			}
+
+			const markdownToHTML = (markdown) => {
+				const codeBlocks = []
+
+				// STORING AND REMOVING ALL THE CODE BLOCKS
+				markdown = markdown.replace(/\`\`\`.*?\n([\s\S]*?)\`\`\`/g, (match, group) => {
+					codeBlocks.push(group)
+					return `%%CODELLAMABLOCK${codeBlocks.length - 1}%%`
+				})
+
+				// SETTING THE MARKDOWN RULES
+				const rules = [
+					{ regex: /\*\*(.*?)\*\*/g, replacement: '<strong>$1</strong>' },
+					{ regex: /\*(.*?)\*/g, replacement: '<em>$1</em>' },
+					{ regex: /__(.*?)__/g, replacement: '<strong>$1</strong>' },
+					{ regex: /_(.*?)_/g, replacement: '<em>$1</em>' },
+					{ regex: /\[(.*?)\]\((.*?)\)/g, replacement: '<a href="$2">$1</a>' },
+					{ regex: /`(.*?)`/g, replacement: '<div class=\'highlighted\'>$1</div>' },
+					{ regex: /^(#{1,6})\s*(.*)$/gm, replacement: (match, hashes, content) => `<h${hashes.length}>${content}</h${hashes.length}>` },
+					{ regex: /^[\*\-\+] (.+)$/gm, replacement: (match, item) => `&#8226; ${item}` },
+				]
+
+				// APPLYING THE MARKDOWN RULES
+				rules.forEach(({ regex, replacement }) => {
+					markdown = markdown.replace(regex, replacement)
+				})
+
+				// RESTORING ALL THE CODE BLOCKS
+				markdown = markdown.replace(/%%CODELLAMABLOCK(\d+)%%/g, (match, index) => {
+					return `<code>${codeBlocks[index].replace(/```/g, '')}</code>`
+				})
+
+				return markdown
+			}
+
+			const ask = async (prompt) => {
+				rendering = true
+				const promptContainer = document.createElement("div")
+				promptContainer.style.margin = "10px"
+				promptContainer.style.textAlign = "right"
+				const promptSpan = document.createElement("span")
+				promptSpan.innerText = prompt
+				promptContainer.append(promptSpan)
+				document.getElementsByClassName("chat")[0].appendChild(promptContainer)
+				setTimeout(() => {
+					document.getElementsByClassName("content")[0].scrollTo(0, document.getElementsByClassName("content")[0].scrollHeight)					
+				}, 25)
+
+				messages.push({ role: "user", content: prompt })
+
+				const chunks = await engine.chat.completions.create({ messages, temperature: 0.25, stream: true })
+
+				const promptResult = document.createElement("span")
+				promptResult.style.backgroundColor = "white"
+				promptResult.innerHTML = "<div class='pointer'></div>"
+				document.getElementsByClassName("chat")[0].appendChild(promptResult)
+
+				let reply = ""
+				for await (const chunk of chunks) {
+					reply += chunk.choices[0]?.delta.content || ""
+					reply = reply.replace("<","&#60;")
+					promptResult.innerHTML = markdownToHTML(reply) + "<div class='pointer'></div>"
+
+					if (document.getElementsByClassName("content")[0].scrollTop > document.getElementsByClassName("content")[0].scrollHeight - document.getElementsByClassName("content")[0].offsetHeight - 50) {
+						setTimeout(() => {
+							document.getElementsByClassName("content")[0].scrollTo(0, document.getElementsByClassName("content")[0].scrollHeight)
+						}, 100)
+					}
+				}
+
+				document.getElementsByClassName("pointer")[0].remove()
+
+				setTimeout(() => {
+					rendering = false
+				}, 250)
+			}
+
+			window.addEventListener("load", () => {
+				if (window.top === window.self) {
+					document.getElementsByClassName("chat")[0].innerHTML = ""
+					document.getElementsByClassName("textbox")[0].placeholder = STRING_PLACEHOLDER
+					document.getElementsByClassName("textbox")[0].disabled = true
+					document.getElementsByClassName("textbox")[0].value = ""
+					document.getElementsByClassName("textbox")[0].addEventListener("keydown", (event) => {
+						if (event.key === "Enter") {
+							event.preventDefault()
+						}
+					})
+					document.getElementsByClassName("textbox")[0].addEventListener("keyup", (event) => {
+						if (event.key === "Enter") {
+							event.preventDefault()
+							const textValue = document.getElementsByClassName("textbox")[0].value.trim()
+							if (textValue !== "" && !rendering) {
+								document.getElementsByClassName("textbox")[0].value = ""
+								ask(textValue)
+							}
+						}
+					})
+					loadWebLLM()
+				}
+			})
+		</script>
+	</body>
+</html>
